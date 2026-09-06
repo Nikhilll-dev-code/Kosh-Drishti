@@ -1,0 +1,44 @@
+# Node / Javascript
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Production Build Outputs
+frontend/dist/
+frontend/build/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+
+# Python & ML
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+env/
+ENV/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Database Local Storage & Caches
+backend/data/db.json
+
+# IDE / OS Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
