@@ -18,6 +18,9 @@ router.get('/works/:work_id', api.getWorkDetail);
 router.post('/auth/register', api.register);
 router.post('/auth/login', api.login);
 
+// AI Explanation Endpoint (public - for demo display)
+router.post('/explain', api.explainWork);
+
 // Auditor Case Management Endpoints
 // Note: GET /cases is updated to allow public read access for demo purposes
 router.get('/cases', api.getCases);
@@ -36,4 +39,4 @@ router.get('/admin/config', requireAuth, requireRole(['Administrator']), api.get
 router.put('/admin/config', requireAuth, requireRole(['Administrator']), api.updateRuleConfig);
 router.get('/admin/audit-log', requireAuth, requireRole(['Administrator']), api.getAuditLogs);
 
-module.exports = router;
+module.exports = router;

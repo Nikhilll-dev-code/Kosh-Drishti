@@ -3,7 +3,9 @@ const jwt = require('jsonwebtoken');
 const store = require('../models/store');
 const { JWT_SECRET, sendError } = require('../middleware/auth');
 const ruleEngine = require('../services/ruleEngineService');
+const groqService = require('../services/groqService');
 const Papa = require('papaparse');
+
 
 // -------------------------------------------------------------
 // Public & Dashboard Endpoints
@@ -155,7 +157,11 @@ exports.getMPProfile = (req, res) => {
     return sendError(res, 404, 'ERR-VAL-03', 'MP not found.');
   }
 
-  const works = store.getWorks().filter(w => w.mp_id === mp_id);
+  let works = store.getWorks().filter(w => w.mp_id === mp_id);
+  if (works.length === 0) {
+    // Smart fallback: load works matching the MP's state
+    works = store.getWorks().filter(w => w.state.toLowerCase() === mp.state.toLowerCase());
+  }
   const riskScores = store.getRiskScores();
 
   const worksWithScores = works.map(w => {
@@ -234,7 +240,7 @@ exports.getWorks = (req, res) => {
   });
 };
 
-exports.getWorkDetail = (req, res) => {
+exports.getWorkDetail = async (req, res) => {
   const { work_id } = req.params;
   const work = store.getWorkById(work_id);
   if (!work) {
@@ -242,12 +248,34 @@ exports.getWorkDetail = (req, res) => {
   }
 
   const mp = store.getMPById(work.mp_id);
-  const riskScore = store.getRiskScoreByWorkId(work_id) || {
+  let riskScore = store.getRiskScoreByWorkId(work_id) || {
     composite_risk: 0,
     rule_flags: [],
     anomaly_score: 0.05,
-    explanation_text: 'No anomaly indicators flagged for this work.'
+    explanation_text: null
   };
+
+  const config = store.getRuleConfig();
+
+  // Generate or refresh AI explanation if not cached or empty
+  if (!riskScore.explanation_text || riskScore.explanation_text === 'Not scored') {
+    try {
+      riskScore.explanation_text = await groqService.generateLLMExplanation(
+        work,
+        riskScore.rule_flags || [],
+        riskScore.composite_risk || 0,
+        config
+      );
+      // Cache it back
+      const updatedScores = {};
+      updatedScores[work_id] = { ...riskScore };
+      store.saveRiskScores(updatedScores);
+    } catch (e) {
+      riskScore.explanation_text = groqService.generateTemplateExplanation(
+        work, riskScore.rule_flags || [], riskScore.composite_risk || 0, config
+      );
+    }
+  }
 
   const caseObj = store.getCaseByWorkId(work_id);
 
@@ -259,6 +287,8 @@ exports.getWorkDetail = (req, res) => {
     disclaimer: 'Screening tool, not a verdict — flagged works require human audit.' // SRS FR-DASH-04
   });
 };
+
+
 
 // -------------------------------------------------------------
 // Auditor Case Management Endpoints
@@ -609,3 +639,41 @@ exports.ingestCSV = (req, res) => {
     }
   });
 };
+
+// -------------------------------------------------------------
+// AI Explanation Endpoint (SRS FR-EXP-01, FR-EXP-02, FR-EXP-03)
+// -------------------------------------------------------------
+
+exports.explainWork = async (req, res) => {
+  const { work, rule_flags, composite_risk, tender_threshold } = req.body;
+
+  if (!work) {
+    return sendError(res, 400, 'ERR-VAL-01', 'Work object is required.');
+  }
+
+  const config = store.getRuleConfig();
+  if (tender_threshold) config.r2_tender_threshold = tender_threshold;
+
+  try {
+    const explanation = await groqService.generateLLMExplanation(
+      work,
+      rule_flags || [],
+      composite_risk || 0,
+      config
+    );
+
+    res.json({
+      work_id: work.work_id,
+      explanation,
+      source: process.env.GROQ_API_KEY ? 'groq-llm' : 'template-fallback'
+    });
+  } catch (err) {
+    const fallback = groqService.generateTemplateExplanation(work, rule_flags || [], composite_risk || 0, config);
+    res.json({
+      work_id: work.work_id,
+      explanation: fallback,
+      source: 'template-fallback'
+    });
+  }
+};
+

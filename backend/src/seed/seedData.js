@@ -14,15 +14,51 @@ async function seed() {
   const mps = [
     {
       mp_id: 'MP-GJ-01',
-      name: 'Pareshbhai Dhanani',
-      constituency: 'Amreli',
+      name: 'Ranjanben Bhatt',
+      constituency: 'Amreli / Vadodara',
       state: 'Gujarat',
-      party: 'INC',
+      party: 'BJP',
       lok_sabha_term: '17th Lok Sabha',
       total_entitlement: 250000000,
       total_released: 250000000,
       total_utilized: 185000000,
       sc_st_spend_pct: { sc: 14.2, st: 6.8 }
+    },
+    {
+      mp_id: 'MP-GJ-VADODARA',
+      name: 'Hemang Joshi',
+      constituency: 'Vadodara',
+      state: 'Gujarat',
+      party: 'BJP',
+      lok_sabha_term: '18th Lok Sabha',
+      total_entitlement: 250000000,
+      total_released: 250000000,
+      total_utilized: 215000000,
+      sc_st_spend_pct: { sc: 16.0, st: 8.0 }
+    },
+    {
+      mp_id: 'MP-GJ-NAVSARI',
+      name: 'C. R. Patil',
+      constituency: 'Navsari',
+      state: 'Gujarat',
+      party: 'BJP',
+      lok_sabha_term: '18th Lok Sabha',
+      total_entitlement: 250000000,
+      total_released: 250000000,
+      total_utilized: 235000000,
+      sc_st_spend_pct: { sc: 17.5, st: 8.5 }
+    },
+    {
+      mp_id: 'MP-GJ-GANDHINAGAR',
+      name: 'Amit Shah',
+      constituency: 'Gandhinagar',
+      state: 'Gujarat',
+      party: 'BJP',
+      lok_sabha_term: '18th Lok Sabha',
+      total_entitlement: 250000000,
+      total_released: 250000000,
+      total_utilized: 240000000,
+      sc_st_spend_pct: { sc: 18.0, st: 9.0 }
     },
     {
       mp_id: 'MP-AP-02',
@@ -91,8 +127,8 @@ async function seed() {
     // Confirmed Demo Case (Gujarat Cooperative Society Duplicate Renovation Claim)
     {
       work_id: 'GW-2018-045',
-      mp_id: 'MP-GJ-01',
-      district_id: 'DIST-GJ-AMR',
+      mp_id: 'MP-GJ-VADODARA', // Assigned to Hemang Joshi (Vadodara)
+      district_id: 'DIST-GJ-VAD',
       ia_id: 'IA-GJ-COOP-01',
       description: 'Panchayat Bhavan building structural renovation and community center expansion at Amreli Panchayat Samiti block 2',
       category: 'Community Infrastructure',
@@ -108,8 +144,8 @@ async function seed() {
     },
     {
       work_id: 'GW-2017-088',
-      mp_id: 'MP-GJ-01',
-      district_id: 'DIST-GJ-AMR',
+      mp_id: 'MP-GJ-VADODARA',
+      district_id: 'DIST-GJ-VAD',
       ia_id: 'IA-GJ-COOP-01',
       description: 'Panchayat Bhavan building structural renovation and community center expansion at Amreli Panchayat Samiti block 2', // Exact duplicate description! (R1)
       category: 'Community Infrastructure',
@@ -126,8 +162,8 @@ async function seed() {
     // Ineligible category example (Temple renovation R3)
     {
       work_id: 'GW-2023-102',
-      mp_id: 'MP-GJ-01',
-      district_id: 'DIST-GJ-AMR',
+      mp_id: 'MP-GJ-VADODARA',
+      district_id: 'DIST-GJ-VAD',
       ia_id: 'IA-GJ-COOP-02',
       description: 'Construction of boundary wall and decorative hall for local Hanuman Temple complex',
       category: 'Religious Structure',
@@ -138,6 +174,57 @@ async function seed() {
       uc_filed_date: null, // UC missing past grace period (R6)
       sc_st_tag: 'None',
       tender_id: 'TND-GJ-902',
+      state: 'Gujarat',
+      financial_year: '2023-24'
+    },
+    {
+      work_id: 'GJ-2023-004',
+      mp_id: 'MP-GJ-01',
+      district_id: 'DIST-GJ-AMR',
+      ia_id: 'IA-GJ-PWD-02',
+      description: 'Construction of Government Girls Primary School Science Laboratory & ICT Library',
+      category: 'Education',
+      sanctioned_amount: 3200000,
+      expenditure: 3200000,
+      sanction_date: '2023-06-15',
+      completion_date: '2023-12-10',
+      uc_filed_date: '2024-01-05',
+      sc_st_tag: 'SC',
+      tender_id: 'TND-GJ-4410',
+      state: 'Gujarat',
+      financial_year: '2023-24'
+    },
+    {
+      work_id: 'GJ-2023-005',
+      mp_id: 'MP-GJ-NAVSARI',
+      district_id: 'DIST-GJ-NAV',
+      ia_id: 'IA-GJ-WSSB-01',
+      description: 'Installation of Solar Powered RO Water Filtration Plants in Rural Tribal Blocks',
+      category: 'Drinking Water',
+      sanctioned_amount: 2800000,
+      expenditure: 2800000,
+      sanction_date: '2023-05-20',
+      completion_date: '2023-10-15',
+      uc_filed_date: '2023-11-02',
+      sc_st_tag: 'ST',
+      tender_id: 'TND-GJ-8812',
+      state: 'Gujarat',
+      financial_year: '2023-24'
+    },
+    {
+      work_id: 'GJ-2023-006',
+      mp_id: 'MP-GJ-GANDHINAGAR',
+      district_id: 'DIST-GJ-GND',
+      ia_id: 'IA-GJ-MUN-01',
+      description: 'Upgradation and digitisation of Multi-purpose Community Skill Development Center',
+      category: 'Community Infrastructure',
+      sanctioned_amount: 4900000,
+      expenditure: 4900000,
+      sanction_date: '2023-07-01',
+      completion_date: '2023-11-30',
+      uc_filed_date: '2023-12-15',
+      sc_st_tag: 'None',
+      tender_id: 'TND-GJ-9910',
       state: 'Gujarat',
       financial_year: '2023-24'
     },
