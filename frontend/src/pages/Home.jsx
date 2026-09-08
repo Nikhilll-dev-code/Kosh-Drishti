@@ -39,6 +39,21 @@ export const Home = () => {
   const navigate = useNavigate();
   const [tableSearch, setTableSearch] = useState('');
   const [selectedZone, setSelectedZone] = useState('All');
+  const [summaryData, setSummaryData] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/dashboard/summary')
+      .then(res => res.json())
+      .then(data => {
+        setSummaryData(data);
+        setLoadingSummary(false);
+      })
+      .catch(err => {
+        console.warn('Dashboard summary fetch failed:', err.message);
+        setLoadingSummary(false);
+      });
+  }, []);
 
   const filteredStates = ALL_INDIAN_STATES.filter((st) =>
     st.state.toLowerCase().includes(tableSearch.toLowerCase())
@@ -111,6 +126,63 @@ export const Home = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Live Backend Audit Pipeline Metrics Banner */}
+      {summaryData && (
+        <motion.div variants={itemVariants} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+            <div>
+              <h2 className="text-lg font-serif font-bold text-slate-900 flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-amber-600" /> Real Dataset &amp; Audit Pipeline Summary
+              </h2>
+              <p className="text-xs text-slate-500 font-sans">
+                Live metrics processed from MoSPI MPLADS dataset (<span className="font-mono text-slate-700">raw_mplads_data.csv</span>) &amp; IsolationForest Anomaly Engine
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-mono font-semibold rounded-full border border-emerald-200">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Pipeline Active
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">Real Constituencies</div>
+              <div className="text-xl font-bold font-mono text-slate-900 mt-1">{summaryData.total_constituencies || 558}</div>
+              <div className="text-[10px] text-emerald-600 font-medium">MoSPI Real Data</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">Total GOI Released</div>
+              <div className="text-xl font-bold font-mono text-slate-900 mt-1">{RUPEE}{summaryData.total_fund_received_cr || 0} Cr</div>
+              <div className="text-[10px] text-slate-500">GOI Allocation</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">Actual Expenditure</div>
+              <div className="text-xl font-bold font-mono text-emerald-700 mt-1">{RUPEE}{summaryData.total_actual_expenditure_cr || 0} Cr</div>
+              <div className="text-[10px] text-emerald-600 font-medium">{summaryData.overall_utilization_pct || 0}% Utilized</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">High Risk Works</div>
+              <div className="text-xl font-bold font-mono text-rose-600 mt-1">{summaryData.risk_distribution?.high || 0}</div>
+              <div className="text-[10px] text-rose-500 font-medium">Risk Score ≥ 65</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">ML Anomalies</div>
+              <div className="text-xl font-bold font-mono text-amber-600 mt-1">{summaryData.anomaly_count || 0}</div>
+              <div className="text-[10px] text-amber-600 font-medium">IsolationForest &ge; 0.5</div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <div className="text-[11px] font-mono text-slate-500 uppercase">Active Cases</div>
+              <div className="text-xl font-bold font-mono text-indigo-600 mt-1">{summaryData.total_cases || 0}</div>
+              <div className="text-[10px] text-indigo-500 font-medium">Audit Queue</div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* National Parliamentary Stats Ribbon */}
       <motion.div

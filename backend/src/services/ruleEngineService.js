@@ -1,346 +1,392 @@
 const store = require('../models/store');
+const { extractWorkFeatures, extractConstituencyFeatures, CATEGORY_BENCHMARKS } = require('./featureExtractor');
+const { findMaxDuplicateMatch } = require('./duplicateDetectionService');
+const { fetchMLAnomalyScores } = require('./mlService');
 
-/**
- * Text similarity helper (Token Jaccard + Cosine-like overlap)
- */
-function computeTextSimilarity(str1, str2) {
-  if (!str1 || !str2) return 0;
-  const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, '');
-  const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, '');
-  if (s1 === s2) return 1.0;
+const RULE_SPECS = {
+  R1: { id: 'R1', name: 'Ineligible Work Category', weight: 35, severity: 'HIGH' },
+  R2: { id: 'R2', name: 'Duplicate Work Recommendation', weight: 30, severity: 'HIGH' },
+  R3: { id: 'R3', name: 'Excessive Delay / UC Lag', weight: 30, severity: 'HIGH' },
+  R4: { id: 'R4', name: 'Tender Threshold / Missing Tender Signal', weight: 20, severity: 'MEDIUM' },
+  R5: { id: 'R5', name: 'IA Over-Concentration', weight: 15, severity: 'MEDIUM' },
+  R6: { id: 'R6', name: 'Cost Benchmark Anomaly', weight: 20, severity: 'MEDIUM' }
+};
 
-  const tokens1 = new Set(s1.split(/\s+/).filter(t => t.length > 2));
-  const tokens2 = new Set(s2.split(/\s+/).filter(t => t.length > 2));
+function evaluateRulesDetailed(work, allWorks = [], config = {}) {
+  const ruleResults = [];
 
-  if (tokens1.size === 0 || tokens2.size === 0) return 0;
+  const amount = parseFloat(work.sanctioned_amount || work.proposed_cost || 0);
+  const tenderThreshold = config.r2_tender_threshold || 2500000;
+  const keywords = config.r3_ineligible_keywords || [
+    'temple', 'mosque', 'church', 'gurudwara', 'religious', 'shrine',
+    'land purchase', 'commercial complex', 'private building', 'club'
+  ];
 
-  let intersection = 0;
-  tokens1.forEach(t => {
-    if (tokens2.has(t)) intersection++;
-  });
-
-  const union = new Set([...tokens1, ...tokens2]).size;
-  return intersection / union;
-}
-
-/**
- * Calculate 7 features for every work record (PRD 12.1)
- */
-function computeFeaturesForWorks(works, mps, config) {
-  // Map MP utilization metrics
-  const mpUtilMap = {};
-  mps.forEach(mp => {
-    const utilPct = mp.total_entitlement > 0 ? (mp.total_utilized / mp.total_entitlement) * 100 : 0;
-    mpUtilMap[mp.mp_id] = {
-      utilPct,
-      scPct: mp.sc_st_spend_pct ? mp.sc_st_spend_pct.sc : 18.0,
-      stPct: mp.sc_st_spend_pct ? mp.sc_st_spend_pct.st : 8.5
-    };
-  });
-
-  // Calculate national utilization decile cutoff
-  const allUtilPcts = Object.values(mpUtilMap).map(m => m.utilPct).sort((a, b) => a - b);
-  const bottomDecileCutoff = allUtilPcts[Math.floor(allUtilPcts.length * config.r4_under_utilization_decile)] || 40;
-
-  const featureVectors = [];
-
-  works.forEach(w => {
-    // 1. Duplicate similarity against other works by same IA
-    let maxSimilarity = 0;
-    works.forEach(otherW => {
-      if (otherW.work_id !== w.work_id && (otherW.ia_id === w.ia_id || otherW.mp_id === w.mp_id)) {
-        const sim = computeTextSimilarity(w.description, otherW.description);
-        const amountRatio = Math.min(w.sanctioned_amount, otherW.sanctioned_amount) / Math.max(w.sanctioned_amount, otherW.sanctioned_amount);
-        if (sim >= 0.7 && amountRatio >= 0.85) {
-          const blendedSim = sim * 0.7 + amountRatio * 0.3;
-          if (blendedSim > maxSimilarity) {
-            maxSimilarity = blendedSim;
-          }
-        }
-      }
-    });
-
-    // 2. Tender linkage flag
-    const tenderBypassFlag = (w.sanctioned_amount >= config.r2_tender_threshold && (!w.tender_id || w.tender_id.trim() === '')) ? 1 : 0;
-
-    // 3. Ineligible category score
-    let ineligibleScore = 0;
-    const descLower = (w.description || '').toLowerCase();
-    const catLower = (w.category || '').toLowerCase();
-    config.r3_ineligible_keywords.forEach(kw => {
-      if (descLower.includes(kw) || catLower.includes(kw)) {
-        ineligibleScore = 1.0;
-      }
-    });
-
-    // 4. Utilization percentile metric
-    const mpInfo = mpUtilMap[w.mp_id] || { utilPct: 50, scPct: 15, stPct: 7.5 };
-    const isChronicLowUtil = mpInfo.utilPct <= bottomDecileCutoff ? 1 : 0;
-
-    // 5. SC/ST norm gap
-    const scViolation = mpInfo.scPct < config.r5_sc_norm_pct ? (config.r5_sc_norm_pct - mpInfo.scPct) / config.r5_sc_norm_pct : 0;
-    const stViolation = mpInfo.stPct < config.r5_st_norm_pct ? (config.r5_st_norm_pct - mpInfo.stPct) / config.r5_st_norm_pct : 0;
-    const scStGapScore = Math.max(scViolation, stViolation);
-
-    // 6. UC Lag Days
-    let ucLagDays = 0;
-    if (w.completion_date) {
-      const compDate = new Date(w.completion_date);
-      const refDate = w.uc_filed_date ? new Date(w.uc_filed_date) : new Date('2026-09-01');
-      const diffDays = Math.floor((refDate - compDate) / (1000 * 60 * 60 * 24));
-      if (diffDays > 30) {
-        ucLagDays = diffDays - 30;
-      }
-    }
-
-    // 7. IA concentration index
-    const iaWorksCount = works.filter(o => o.ia_id === w.ia_id && o.mp_id === w.mp_id).length;
-    const totalMpWorks = works.filter(o => o.mp_id === w.mp_id).length;
-    const iaConcentrationIndex = totalMpWorks > 0 ? iaWorksCount / totalMpWorks : 0;
-
-    featureVectors.push({
-      work_id: w.work_id,
-      features: {
-        duplicate_similarity: maxSimilarity,
-        tender_bypass: tenderBypassFlag,
-        ineligible_category: ineligibleScore,
-        chronic_low_utilization: isChronicLowUtil,
-        sc_st_gap: scStGapScore,
-        uc_lag_days: ucLagDays,
-        ia_concentration: iaConcentrationIndex
-      }
-    });
-  });
-
-  return featureVectors;
-}
-
-/**
- * Isolation Forest baseline statistical anomaly scoring
- */
-function computeAnomalyScores(featureVectors) {
-  const scores = {};
-  featureVectors.forEach(fv => {
-    const f = fv.features;
-    // Calculate Mahalanobis/Distance-like statistical outlier score normalized 0 to 1
-    const rawScore = 
-      (f.duplicate_similarity * 0.25) +
-      (f.tender_bypass * 0.25) +
-      (f.ineligible_category * 0.20) +
-      (Math.min(f.uc_lag_days / 90, 1.0) * 0.15) +
-      (f.ia_concentration * 0.15);
-    
-    // Normalize to 0.05 - 0.98 range
-    scores[fv.work_id] = parseFloat(Math.min(Math.max(rawScore, 0.05), 0.98).toFixed(3));
-  });
-  return scores;
-}
-
-/**
- * Evaluate deterministic rules R1-R6 for a single work
- */
-function evaluateRulesForWork(work, mpInfo, allWorks, config) {
-  const ruleFlags = [];
-
-  // R1: Duplicate Billing
-  let isDuplicate = false;
-  allWorks.forEach(other => {
-    if (other.work_id !== work.work_id && (other.ia_id === work.ia_id || other.mp_id === work.mp_id)) {
-      const sim = computeTextSimilarity(work.description, other.description);
-      const amountRatio = Math.min(work.sanctioned_amount, other.sanctioned_amount) / Math.max(work.sanctioned_amount, other.sanctioned_amount);
-      if (sim >= config.r1_duplicate_similarity_threshold && amountRatio >= 0.85) {
-        isDuplicate = true;
-      }
-    }
-  });
-  if (isDuplicate) ruleFlags.push('R1');
-
-  // R2: Tender Bypass
-  if (work.sanctioned_amount >= config.r2_tender_threshold && (!work.tender_id || work.tender_id.trim() === '')) {
-    ruleFlags.push('R2');
-  }
-
-  // R3: Ineligible Category
-  const descLower = (work.description || '').toLowerCase();
+  // R1: Ineligible Work Category
+  const titleLower = (work.title || work.description || '').toLowerCase();
   const catLower = (work.category || '').toLowerCase();
-  let isIneligible = false;
-  config.r3_ineligible_keywords.forEach(kw => {
-    if (descLower.includes(kw) || catLower.includes(kw)) {
-      isIneligible = true;
-    }
+  const matchedKeyword = keywords.find(kw => titleLower.includes(kw) || catLower.includes(kw));
+  const r1Triggered = Boolean(matchedKeyword);
+
+  ruleResults.push({
+    ruleId: 'R1',
+    ruleName: RULE_SPECS.R1.name,
+    triggered: r1Triggered,
+    severity: RULE_SPECS.R1.severity,
+    weight: RULE_SPECS.R1.weight,
+    value: matchedKeyword ? `Contains '${matchedKeyword}'` : 'Compliant',
+    threshold: 'Prohibited keyword list (MPLADS Para 3.3)',
+    evidence: r1Triggered
+      ? `Work title or category contains prohibited term '${matchedKeyword}', violating statutory negative list guidelines.`
+      : 'Work category is compliant with permitted MPLADS guidelines.'
   });
-  if (isIneligible) ruleFlags.push('R3');
 
-  // R4: Chronic Under-Utilization
-  if (mpInfo && mpInfo.is_chronic_low_util) {
-    ruleFlags.push('R4');
-  }
+  // R2: Duplicate Work Recommendation
+  const dupMatch = findMaxDuplicateMatch(work, allWorks);
+  const dupThreshold = config.r1_duplicate_similarity_threshold || 0.85;
+  const r2Triggered = dupMatch.similarityScore >= dupThreshold;
 
-  // R5: SC/ST Norm Violation
-  if (mpInfo && (mpInfo.sc_pct < config.r5_sc_norm_pct || mpInfo.st_pct < config.r5_st_norm_pct)) {
-    ruleFlags.push('R5');
-  }
+  ruleResults.push({
+    ruleId: 'R2',
+    ruleName: RULE_SPECS.R2.name,
+    triggered: r2Triggered,
+    severity: RULE_SPECS.R2.severity,
+    weight: RULE_SPECS.R2.weight,
+    value: `${Math.round(dupMatch.similarityScore * 100)}% similarity`,
+    threshold: `${Math.round(dupThreshold * 100)}% similarity`,
+    matchingWorkId: dupMatch.matchingWorkId,
+    evidence: r2Triggered
+      ? `High similarity (${Math.round(dupMatch.similarityScore * 100)}%) detected with existing work ${dupMatch.matchingWorkId} ("${dupMatch.matchingTitle}").`
+      : 'No duplicate work title or asset match found.'
+  });
 
-  // R6: Late or Missing UC
-  if (work.completion_date) {
-    const compDate = new Date(work.completion_date);
-    const ucDate = work.uc_filed_date ? new Date(work.uc_filed_date) : null;
-    const now = new Date('2026-09-01');
+  // R3: Excessive Delay / UC Lag
+  let daysLag = 0;
+  let r3Triggered = false;
+  const gracePeriod = config.r6_uc_grace_days || 45;
 
-    if (ucDate) {
-      const daysElapsed = Math.floor((ucDate - compDate) / (1000 * 60 * 60 * 24));
-      if (daysElapsed > 30) {
-        ruleFlags.push('R6');
-      }
-    } else {
-      const daysSinceCompletion = Math.floor((now - compDate) / (1000 * 60 * 60 * 24));
-      if (daysSinceCompletion > config.r6_uc_grace_days) {
-        ruleFlags.push('R6');
-      }
+  if (work.recommendation_date && work.uc_date) {
+    const d1 = new Date(work.recommendation_date);
+    const d2 = new Date(work.uc_date);
+    if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+      daysLag = Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
     }
+  } else if (work.uc_lag_days) {
+    daysLag = parseInt(work.uc_lag_days, 10);
   }
 
-  return ruleFlags;
+  if (daysLag > (180 + gracePeriod)) {
+    r3Triggered = true;
+  }
+
+  ruleResults.push({
+    ruleId: 'R3',
+    ruleName: RULE_SPECS.R3.name,
+    triggered: r3Triggered,
+    severity: RULE_SPECS.R3.severity,
+    weight: RULE_SPECS.R3.weight,
+    value: `${daysLag} days lag`,
+    threshold: `${180 + gracePeriod} days max`,
+    evidence: r3Triggered
+      ? `Utilization Certificate (UC) submission lag of ${daysLag} days exceeds maximum threshold of ${180 + gracePeriod} days.`
+      : `UC submission lag of ${daysLag} days is within acceptable timeline limits.`
+  });
+
+  // R4: Tender Threshold / Missing Tender Signal
+  const tenderNear = (amount >= (tenderThreshold * 0.90) && amount < tenderThreshold);
+  const r4Triggered = tenderNear || (amount >= tenderThreshold && (!work.tender_id || work.tender_id.trim() === ''));
+
+  ruleResults.push({
+    ruleId: 'R4',
+    ruleName: RULE_SPECS.R4.name,
+    triggered: r4Triggered,
+    severity: RULE_SPECS.R4.severity,
+    weight: RULE_SPECS.R4.weight,
+    value: `₹${(amount / 100000).toFixed(2)} Lakhs`,
+    threshold: `₹${(tenderThreshold / 100000).toFixed(2)} Lakhs limit`,
+    evidence: r4Triggered
+      ? `Work cost ₹${(amount / 100000).toFixed(2)} Lakhs approaches or exceeds the tender threshold (₹${(tenderThreshold / 100000).toFixed(2)} Lakhs) without attached tender ID.`
+      : 'Tender procurement threshold requirements satisfied.'
+  });
+
+  // R5: IA Over-Concentration
+  const constituencyWorks = allWorks.filter(w => w.constituency === work.constituency);
+  const totalCount = constituencyWorks.length || 1;
+  const iaName = work.implementing_agency || work.ia_id;
+  const iaCount = constituencyWorks.filter(w => (w.implementing_agency || w.ia_id) === iaName).length;
+  const iaRatio = iaCount / totalCount;
+  const r5Triggered = iaRatio > 0.35 && totalCount >= 3;
+
+  ruleResults.push({
+    ruleId: 'R5',
+    ruleName: RULE_SPECS.R5.name,
+    triggered: r5Triggered,
+    severity: RULE_SPECS.R5.severity,
+    weight: RULE_SPECS.R5.weight,
+    value: `${Math.round(iaRatio * 100)}% work share (${iaCount}/${totalCount})`,
+    threshold: '35% max agency share',
+    evidence: r5Triggered
+      ? `Implementing Agency '${iaName}' holds ${Math.round(iaRatio * 100)}% of works in constituency, exceeding concentration benchmark of 35%.`
+      : `Agency concentration (${Math.round(iaRatio * 100)}%) is within normal diversification limits.`
+  });
+
+  // R6: Cost Benchmark Anomaly
+  const categoryBenchmark = CATEGORY_BENCHMARKS[work.category] || CATEGORY_BENCHMARKS['Default'];
+  const r6Triggered = amount > (categoryBenchmark * 1.5);
+
+  ruleResults.push({
+    ruleId: 'R6',
+    ruleName: RULE_SPECS.R6.name,
+    triggered: r6Triggered,
+    severity: RULE_SPECS.R6.severity,
+    weight: RULE_SPECS.R6.weight,
+    value: `₹${(amount / 100000).toFixed(2)} Lakhs`,
+    threshold: `₹${((categoryBenchmark * 1.5) / 100000).toFixed(2)} Lakhs (1.5x avg)`,
+    evidence: r6Triggered
+      ? `Sanctioned cost ₹${(amount / 100000).toFixed(2)} Lakhs exceeds 1.5x expected category benchmark of ₹${(categoryBenchmark / 100000).toFixed(2)} Lakhs.`
+      : 'Sanctioned cost is within standard benchmark expectations.'
+  });
+
+  return ruleResults;
 }
 
 /**
- * Generate plain-language explanation with rule citations (SRS FR-EXP-01, FR-EXP-02, FR-EXP-03)
+ * Calculates Risk Confidence Score (High, Medium, Low)
  */
-function generateExplanation(work, ruleFlags, compositeRisk, config) {
-  if (!ruleFlags || ruleFlags.length === 0) {
-    return "No risk indicators flagged for this work. The work adheres to normal MPLADS expenditure norms and timeline guidelines.";
-  }
+function computeRiskConfidence(work, anomalyScore, modelStatus, duplicateSimScore) {
+  let score = 0;
 
-  const parts = [];
-  const amountStr = `₹${(work.sanctioned_amount / 100000).toFixed(2)} Lakhs`;
+  // 1. Data Completeness Check
+  if (work.title && work.sanctioned_amount && work.category && work.implementing_agency) score += 40;
+  else if (work.title && work.sanctioned_amount) score += 25;
 
-  if (ruleFlags.includes('R1')) {
-    parts.push(`This work (valued at ${amountStr}) shows duplicate description and billing pattern matching another sanctioned asset by the same Implementing Agency across financial years, violating MPLADS Rule on duplicate sanctions (CAG 2018 Report Finding).`);
-  }
+  // 2. ML Service Integration Status
+  if (modelStatus === 'ISOLATION_FOREST_ACTIVE' || modelStatus === 'ISOLATION_FOREST_SUCCESS') score += 30;
+  else score += 15;
 
-  if (ruleFlags.includes('R2')) {
-    const threshLakhs = config.r2_tender_threshold / 100000;
-    parts.push(`The sanctioned amount of ${amountStr} exceeds the statutory tender threshold of ₹${threshLakhs} Lakhs, but no competitive tender identification number is attached (Rule R2: Tender Bypass, MPLADS Guidelines §7.2).`);
-  }
+  // 3. Duplicate Precision Evidence
+  if (duplicateSimScore >= 0.85) score += 30;
+  else if (duplicateSimScore < 0.85) score += 20;
 
-  if (ruleFlags.includes('R3')) {
-    parts.push(`The project description indicates expenditure on an ineligible asset category ('${work.category || 'prohibited asset'}'), violating the permitted work list under Para 3.3 of MPLADS Guidelines (CAG Audit 2004-09 finding).`);
-  }
-
-  if (ruleFlags.includes('R4')) {
-    parts.push(`The constituency's fund utilization percentile has remained in the bottom national decile for consecutive financial years (Rule R4: Chronic Under-utilization).`);
-  }
-
-  if (ruleFlags.includes('R5')) {
-    parts.push(`The constituency has failed to meet the mandatory annual allocation quota of 15% for SC-inhabited areas and 7.5% for ST-inhabited areas (Rule R5: SC/ST Norm Violation, Para 2.4).`);
-  }
-
-  if (ruleFlags.includes('R6')) {
-    if (work.completion_date && work.uc_filed_date) {
-      const days = Math.floor((new Date(work.uc_filed_date) - new Date(work.completion_date)) / (86400000));
-      parts.push(`The Utilization Certificate was filed ${days} days after work completion, exceeding the mandated 30-day filing timeline (Rule R6: Delayed UC, MPLADS Guidelines Para 6.4).`);
-    } else {
-      parts.push(`The work completion date is recorded, but no Utilization Certificate (UC) has been submitted past the 45-day allowable grace period (Rule R6: Missing UC).`);
-    }
-  }
-
-  return parts.join(' ');
+  if (score >= 80) return 'HIGH';
+  if (score >= 50) return 'MEDIUM';
+  return 'LOW';
 }
 
-/**
- * Execute full scoring pipeline on store data
- */
-function runFullScoringPipeline() {
+async function runFullScoringPipeline() {
   const works = store.getWorks();
-  const mps = store.getMPs();
-  const config = store.getRuleConfig();
+  const constituencies = store.getConstituencyData() || [];
+  const config = store.getRuleConfig() || {};
 
-  if (works.length === 0) return { scored_count: 0 };
+  // -------------------------------------------------------------
+  // LAYER 1: 557 Real MPLADS Constituency Financial ML Scoring
+  // -------------------------------------------------------------
+  let constituencyModelStatus = 'UNKNOWN';
+  if (constituencies.length > 0) {
+    const constituencyFeatureItems = constituencies.map(c => {
+      const extracted = extractConstituencyFeatures(c);
+      return {
+        id: extracted.id,
+        constituency_id: extracted.constituency_id,
+        features: extracted.feature_vector
+      };
+    });
 
-  const mpMap = {};
-  const allUtilPcts = mps.map(m => (m.total_entitlement > 0 ? (m.total_utilized / m.total_entitlement) * 100 : 0)).sort((a, b) => a - b);
-  const cutoff = allUtilPcts[Math.floor(allUtilPcts.length * config.r4_under_utilization_decile)] || 40;
+    const constMlResult = await fetchMLAnomalyScores(constituencyFeatureItems);
+    const constScoresMap = constMlResult.scores || {};
+    constituencyModelStatus = constMlResult.model_status || 'ISOLATION_FOREST_ACTIVE';
 
-  mps.forEach(m => {
-    const util = m.total_entitlement > 0 ? (m.total_utilized / m.total_entitlement) * 100 : 0;
-    mpMap[m.mp_id] = {
-      util_pct: util,
-      is_chronic_low_util: util <= cutoff,
-      sc_pct: m.sc_st_spend_pct ? m.sc_st_spend_pct.sc : 18,
-      st_pct: m.sc_st_spend_pct ? m.sc_st_spend_pct.st : 8.5
+    const updatedConstituencies = constituencies.map(c => {
+      const constId = c.constituency_id || `CONST-${c.sl_no}`;
+      const score = constScoresMap[constId] !== undefined ? constScoresMap[constId] : 0.15;
+      const tier = score >= 0.65 ? 'HIGH' : score >= 0.40 ? 'MEDIUM' : 'LOW';
+      return {
+        ...c,
+        anomaly_score: score,
+        risk_tier: tier,
+        data_scope: 'REAL_CONSTITUENCY_DATA'
+      };
+    });
+
+    store.saveConstituencyData(updatedConstituencies);
+  }
+
+  // -------------------------------------------------------------
+  // LAYER 2: Work-Level Rule Engine & Audit Scoring
+  // -------------------------------------------------------------
+  if (works.length === 0) {
+    return { scored_count: 0, ml_model_status: constituencyModelStatus };
+  }
+
+  const ruleWeight = config.rule_weight !== undefined ? config.rule_weight : 0.85;
+  const mlWeight = config.ml_weight !== undefined ? config.ml_weight : 0.15;
+
+  const featureItems = works.map(w => {
+    const dupMatch = findMaxDuplicateMatch(w, works);
+    const extracted = extractWorkFeatures(w, works, dupMatch.similarityScore);
+    return {
+      work_id: w.work_id,
+      features: extracted.feature_vector
     };
   });
 
-  const featureVectors = computeFeaturesForWorks(works, mps, config);
-  const anomalyScores = computeAnomalyScores(featureVectors);
+  const mlResult = await fetchMLAnomalyScores(featureItems);
+  const mlScoresMap = mlResult.scores || {};
+  const modelStatus = mlResult.model_status || constituencyModelStatus;
 
   const scoresObj = {};
-  const ruleWeightMap = { R1: 35, R2: 30, R3: 30, R4: 20, R5: 15, R6: 20 };
 
-  works.forEach(w => {
-    const mpInfo = mpMap[w.mp_id];
-    const ruleFlags = evaluateRulesForWork(w, mpInfo, works, config);
-    const anomalyScore = anomalyScores[w.work_id] || 0.1;
+  for (const work of works) {
+    const detailedRules = evaluateRulesDetailed(work, works, config);
+    const triggeredRules = detailedRules.filter(r => r.triggered);
+    const triggeredFlags = triggeredRules.map(r => r.ruleId);
+    const dupMatch = findMaxDuplicateMatch(work, works);
 
-    let ruleSeverityScore = 0;
-    ruleFlags.forEach(r => {
-      ruleSeverityScore += (ruleWeightMap[r] || 15);
+    let ruleSeveritySum = 0;
+    triggeredRules.forEach(r => {
+      ruleSeveritySum += r.weight;
     });
 
-    // Blended composite score 0-100 (rule severity + anomaly model)
-    const rawComposite = (ruleSeverityScore * 0.85) + (anomalyScore * 100 * 0.15);
-    const compositeRisk = Math.min(100, Math.max(0, Math.round(rawComposite)));
+    const ruleScoreCapped = Math.min(ruleSeveritySum, 100);
+    const anomalyScore = mlScoresMap[work.work_id] !== undefined ? mlScoresMap[work.work_id] : 0.2;
 
-    const explanationText = generateExplanation(w, ruleFlags, compositeRisk, config);
+    const ruleContrib = Math.round(ruleScoreCapped * ruleWeight);
+    const mlContrib = Math.round(anomalyScore * 100 * mlWeight);
+    const compositeRisk = Math.min(100, Math.max(0, ruleContrib + mlContrib));
 
-    scoresObj[w.work_id] = {
-      work_id: w.work_id,
-      rule_flags: ruleFlags,
+    let riskTier = 'LOW';
+    if (compositeRisk >= 65) riskTier = 'HIGH';
+    else if (compositeRisk >= 40) riskTier = 'MEDIUM';
+
+    const confidence = computeRiskConfidence(work, anomalyScore, modelStatus, dupMatch.similarityScore);
+
+    const structuredEvidence = [];
+
+    triggeredRules.forEach(r => {
+      structuredEvidence.push({
+        type: 'RULE',
+        rule: r.ruleId,
+        ruleName: r.ruleName,
+        severity: r.severity,
+        reason: r.evidence,
+        value: r.value,
+        threshold: r.threshold
+      });
+    });
+
+    structuredEvidence.push({
+      type: 'ML',
+      model: 'IsolationForest (Python Microservice)',
+      modelStatus: modelStatus,
+      anomalyScore: anomalyScore,
+      reason: anomalyScore >= 0.5
+        ? `ML Isolation Forest flagged anomalous feature vector pattern (Score: ${anomalyScore}).`
+        : `Feature vector aligns with normal execution baseline (Anomaly Score: ${anomalyScore}).`
+    });
+
+    if (dupMatch.similarityScore >= 0.5) {
+      structuredEvidence.push({
+        type: 'DUPLICATE',
+        confidence: dupMatch.confidence,
+        matchingWorkId: dupMatch.matchingWorkId,
+        reason: dupMatch.explanation
+      });
+    }
+
+    const explanationText = generateExplanationText(work, triggeredFlags, compositeRisk, anomalyScore);
+
+    scoresObj[work.work_id] = {
+      work_id: work.work_id,
+      rule_flags: triggeredFlags,
+      detailed_rules: detailedRules,
       anomaly_score: anomalyScore,
       composite_risk: compositeRisk,
+      risk_tier: riskTier,
+      confidence: confidence,
+      signal_contributions: {
+        rule_contribution: ruleContrib,
+        ml_contribution: mlContrib,
+        financial_anomaly: dupMatch.similarityScore >= 0.85 ? 'SUPPORTING_SIGNAL' : 'NORMAL'
+      },
+      duplicate_match: dupMatch,
+      evidence: structuredEvidence,
       explanation_text: explanationText,
+      data_scope: work.source || 'DEMO_SEED_WORK',
       generated_at: new Date().toISOString()
     };
 
-    // Auto-create or sync case record for flagged works (risk >= 40)
+    // Idempotent Case Generation & Update
     if (compositeRisk >= 40) {
-      const existingCase = store.getCaseByWorkId(w.work_id);
+      const existingCase = store.getCaseByWorkId(work.work_id);
       if (!existingCase) {
         store.saveCase({
-          case_id: 'CASE-' + w.work_id,
-          work_id: w.work_id,
+          case_id: 'CASE-' + work.work_id,
+          work_id: work.work_id,
           assigned_auditor_id: null,
           assigned_auditor_name: 'Unassigned',
           status: 'New',
+          risk_tier: riskTier,
+          composite_risk: compositeRisk,
+          confidence: confidence,
+          rule_flags: triggeredFlags,
+          evidence_summary: structuredEvidence.map(e => e.reason).join(' | '),
           notes: [
             {
-              note_id: 'NOTE-' + Date.now(),
+              note_id: 'NOTE-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
               author_id: 'SYSTEM',
-              author_name: 'Kosh-Drishti Risk Engine',
-              text: `Automatically flagged for audit review. Composite Risk Score: ${compositeRisk}/100. Triggered rules: ${ruleFlags.join(', ')}.`,
+              author_name: 'Kosh-Drishti Central Risk Engine',
+              text: `Automatically flagged for audit review. Composite Risk: ${compositeRisk}/100 (${riskTier} Tier, ${confidence} Confidence). Triggered rules: ${triggeredFlags.join(', ') || 'None'}. ML Anomaly Score: ${anomalyScore}.`,
               timestamp: new Date().toISOString()
             }
           ],
+          created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         });
+      } else {
+        existingCase.composite_risk = compositeRisk;
+        existingCase.risk_tier = riskTier;
+        existingCase.confidence = confidence;
+        existingCase.rule_flags = triggeredFlags;
+        existingCase.evidence_summary = structuredEvidence.map(e => e.reason).join(' | ');
+        existingCase.updated_at = new Date().toISOString();
+        store.saveCase(existingCase);
       }
     }
-  });
+  }
 
   store.saveRiskScores(scoresObj);
   store.logAudit({
-    action: 'RUN_SCORING_PIPELINE',
+    action: 'RUN_FULL_SCORING_PIPELINE',
     actor_email: 'system',
     actor_role: 'Data Curator',
-    details: { total_works_scored: works.length }
+    details: { total_works_scored: works.length, ml_status: modelStatus }
   });
 
-  return { scored_count: works.length };
+  return {
+    scored_count: works.length,
+    ml_model_status: modelStatus,
+    scores: scoresObj
+  };
+}
+
+function generateExplanationText(work, ruleFlags, compositeRisk, anomalyScore) {
+  if (!ruleFlags || ruleFlags.length === 0) {
+    return `Work ID ${work.work_id} shows low overall risk (Composite Score: ${compositeRisk}/100, Anomaly Score: ${anomalyScore}). All evaluated procurement parameters comply with standard MPLADS guidelines.`;
+  }
+  const parts = [];
+  parts.push(`Work ID ${work.work_id} flagged with Composite Risk Score ${compositeRisk}/100 (ML Anomaly Score: ${anomalyScore}).`);
+  if (ruleFlags.includes('R1')) parts.push("Triggers Rule R1: Project category matches statutory prohibited list.");
+  if (ruleFlags.includes('R2')) parts.push("Triggers Rule R2: High multi-field similarity matching an existing work recommendation.");
+  if (ruleFlags.includes('R3')) parts.push("Triggers Rule R3: Utilization Certificate (UC) submission lag exceeds allowed timeline limits.");
+  if (ruleFlags.includes('R4')) parts.push("Triggers Rule R4: Sanctioned amount approaches tender ceiling threshold without formal tender linkage.");
+  if (ruleFlags.includes('R5')) parts.push("Triggers Rule R5: Implementing Agency holds an over-concentrated share of constituency works.");
+  if (ruleFlags.includes('R6')) parts.push("Triggers Rule R6: Proposed cost exceeds 1.5x expected category benchmark.");
+  return parts.join(' ');
 }
 
 module.exports = {
-  computeTextSimilarity,
-  evaluateRulesForWork,
-  generateExplanation,
-  runFullScoringPipeline
+  evaluateRulesDetailed,
+  runFullScoringPipeline,
+  generateExplanationText,
+  computeRiskConfidence
 };

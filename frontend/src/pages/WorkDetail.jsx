@@ -300,26 +300,85 @@ export const WorkDetail = () => {
           </div>
 
           <motion.div variants={itemVariants} className="bg-ledger-navy rounded-2xl border border-slate-700 shadow-xs overflow-hidden text-white">
-            <div className="p-5 border-b border-slate-600 flex items-center justify-between gap-4">
+            <div className="p-5 border-b border-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-amber-400" />
-                <h2 className="font-serif font-bold text-base">AI Risk Assessment</h2>
-              </div>
-              <div className="text-right">
-                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block">Composite Risk Score</span>
-                <span className="text-2xl font-bold text-amber-400">{compositeRisk}/100</span>
-              </div>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block mb-2">Triggered Rules</span>
-                <div className="flex flex-wrap gap-2">
-                  {ruleFlags.length > 0 ? ruleFlags.map((rule) => <RuleBadge key={rule} code={rule} />) : <span className="text-xs text-slate-300">No rules triggered</span>}
+                <div>
+                  <h2 className="font-serif font-bold text-base">AI Audit &amp; Anomaly Assessment</h2>
+                  <span className="text-[10px] text-slate-300 font-mono">
+                    Combined Risk Engine: {work.source || 'DEMO_SEED_WORK'}
+                  </span>
                 </div>
               </div>
-              <div className="border-t border-slate-600 pt-4">
-                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block mb-1">Plain-language explanation</span>
-                <p className="text-sm leading-relaxed text-slate-100">{explanation}</p>
+
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block">Composite Risk</span>
+                  <span className="text-2xl font-bold font-mono text-amber-400">{compositeRisk}/100</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Risk Breakdown & Weight Distribution */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3.5 bg-slate-900/60 rounded-xl border border-slate-700/60 font-mono text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">RISK TIER</span>
+                  <span className={`font-bold ${riskScore.risk_tier === 'HIGH' ? 'text-rose-400' : riskScore.risk_tier === 'MEDIUM' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {riskScore.risk_tier || (compositeRisk >= 65 ? 'HIGH' : compositeRisk >= 40 ? 'MEDIUM' : 'LOW')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">ML ANOMALY SCORE</span>
+                  <span className="font-bold text-sky-400">{riskScore.anomaly_score ?? 0.2}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px]">FORMULA WEIGHT</span>
+                  <span className="text-slate-300">85% Rule / 15% ML</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block mb-2">Triggered Rule Violations</span>
+                <div className="flex flex-wrap gap-2">
+                  {ruleFlags.length > 0 ? (
+                    ruleFlags.map((rule) => <RuleBadge key={rule} code={rule} />)
+                  ) : (
+                    <span className="text-xs text-slate-300">No rule violations flagged</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Structured Evidence List (SIH Audit Transparency) */}
+              {riskScore.evidence && Array.isArray(riskScore.evidence) && riskScore.evidence.length > 0 && (
+                <div className="border-t border-slate-700/80 pt-4 space-y-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wide text-amber-300 block">Structured Audit Evidence</span>
+                  <div className="space-y-2">
+                    {riskScore.evidence.map((ev, idx) => (
+                      <div key={idx} className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 text-xs font-sans space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-mono">
+                          <span className={`font-bold ${ev.type === 'RULE' ? 'text-amber-400' : 'text-sky-400'}`}>
+                            [{ev.type}] {ev.rule ? `${ev.rule} - ${ev.ruleName}` : ev.model || 'Anomaly Engine'}
+                          </span>
+                          {ev.severity && <span className="text-rose-400 font-semibold">{ev.severity}</span>}
+                        </div>
+                        <p className="text-slate-200 text-xs leading-relaxed">{ev.reason}</p>
+                        {ev.value && ev.threshold && (
+                          <div className="text-[10px] font-mono text-slate-400 pt-0.5">
+                            Value: <span className="text-slate-200">{ev.value}</span> &middot; Threshold: <span className="text-slate-200">{ev.threshold}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-slate-700/80 pt-4">
+                <span className="text-[10px] font-mono uppercase tracking-wide text-slate-300 block mb-1">Groq LLM Audit Explanation</span>
+                <p className="text-xs leading-relaxed text-slate-200 p-3 bg-slate-900/80 rounded-xl border border-slate-700/50 whitespace-pre-line">
+                  {explanation}
+                </p>
               </div>
             </div>
           </motion.div>

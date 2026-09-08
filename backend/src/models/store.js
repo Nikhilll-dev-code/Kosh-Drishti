@@ -11,6 +11,7 @@ class Store {
     this.dbFile = path.join(DATA_DIR, 'db.json');
     this.data = {
       works: [],
+      constituencyData: [],
       mps: [],
       districts: [],
       ias: [],
@@ -28,7 +29,9 @@ class Store {
         r4_under_utilization_decile: 0.10,
         r5_sc_norm_pct: 15.0,
         r5_st_norm_pct: 7.5,
-        r6_uc_grace_days: 45 // 30 day norm + 15 days buffer
+        r6_uc_grace_days: 45, // 30 day norm + 15 days buffer
+        rule_weight: 0.85,    // Default 85% rule engine contribution
+        ml_weight: 0.15       // Default 15% ML anomaly contribution
       }
     };
     this.load();
@@ -65,6 +68,16 @@ class Store {
 
   saveWorks(works) {
     this.data.works = works;
+    this.save();
+  }
+
+  // Constituency Data operations (Real aggregate CSV dataset)
+  getConstituencyData() {
+    return this.data.constituencyData || [];
+  }
+
+  saveConstituencyData(records) {
+    this.data.constituencyData = records;
     this.save();
   }
 

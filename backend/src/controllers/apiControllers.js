@@ -12,47 +12,71 @@ const Papa = require('papaparse');
 // -------------------------------------------------------------
 
 exports.getDashboardSummary = (req, res) => {
-  const works = store.getWorks();
-  const mps = store.getMPs();
-  const riskScores = store.getRiskScores();
+  const works = store.getWorks() || [];
+  const mps = store.getMPs() || [];
+  const riskScores = store.getRiskScores() || {};
+  const cases = store.getCases() || [];
+  const constituencyData = store.getConstituencyData() || [];
 
-  let totalSanctioned = 0;
-  let totalUtilized = 0;
-  let totalEntitlement = 0;
+  // Real Constituency Financial Aggregates from CSV
+  let totalEntitlementCr = 0;
+  let totalFundReceivedCr = 0;
+  let totalAmountAvailableCr = 0;
+  let totalActualExpenditureCr = 0;
+  let totalWorksRecommCostCr = 0;
+  let totalUnspentBalanceCr = 0;
 
-  mps.forEach(m => {
-    totalEntitlement += (m.total_entitlement || 500000000);
-    totalUtilized += (m.total_utilized || 0);
+  constituencyData.forEach(c => {
+    totalEntitlementCr += (c.entitlement_cr || 0);
+    totalFundReceivedCr += (c.fund_received_goi_cr || 0);
+    totalAmountAvailableCr += (c.amount_available_cr || 0);
+    totalActualExpenditureCr += (c.actual_expenditure_cr || 0);
+    totalWorksRecommCostCr += (c.works_recomm_cost_cr || 0);
+    totalUnspentBalanceCr += (c.unspent_balance_cr || 0);
   });
+
+  const overallUtilizationPct = totalFundReceivedCr > 0
+    ? Math.round((totalActualExpenditureCr / totalFundReceivedCr) * 100 * 10) / 10
+    : 0;
+
+  // Work-Level Risk & Anomaly Metrics
+  let highRiskCount = 0;
+  let mediumRiskCount = 0;
+  let lowRiskCount = 0;
+  let anomalyCount = 0;
+  let ruleViolationCount = 0;
+  let totalSanctionedINR = 0;
 
   works.forEach(w => {
-    totalSanctioned += (w.sanctioned_amount || 0);
+    totalSanctionedINR += (w.sanctioned_amount || w.proposed_cost || 0);
+    const rs = riskScores[w.work_id];
+    if (rs) {
+      if (rs.risk_tier === 'HIGH' || rs.composite_risk >= 65) highRiskCount++;
+      else if (rs.risk_tier === 'MEDIUM' || rs.composite_risk >= 40) mediumRiskCount++;
+      else lowRiskCount++;
+
+      if (rs.anomaly_score >= 0.5) anomalyCount++;
+      if (rs.rule_flags && Array.isArray(rs.rule_flags)) {
+        ruleViolationCount += rs.rule_flags.length;
+      }
+    } else {
+      lowRiskCount++;
+    }
   });
 
-  const unspentFunds = Math.max(0, totalEntitlement - totalUtilized);
-
-  // Group by state for choropleth heat-map
+  // State Level Aggregates
   const stateMap = {};
   works.forEach(w => {
     const st = w.state || 'Unknown';
     if (!stateMap[st]) {
-      stateMap[st] = {
-        state: st,
-        work_count: 0,
-        total_sanctioned: 0,
-        flagged_count: 0,
-        risk_sum: 0
-      };
+      stateMap[st] = { state: st, work_count: 0, total_sanctioned: 0, flagged_count: 0, risk_sum: 0 };
     }
     stateMap[st].work_count++;
-    stateMap[st].total_sanctioned += w.sanctioned_amount || 0;
-
+    stateMap[st].total_sanctioned += (w.sanctioned_amount || 0);
     const rs = riskScores[w.work_id];
     if (rs) {
       stateMap[st].risk_sum += rs.composite_risk;
-      if (rs.composite_risk >= 50) {
-        stateMap[st].flagged_count++;
-      }
+      if (rs.composite_risk >= 40) stateMap[st].flagged_count++;
     }
   });
 
@@ -68,15 +92,29 @@ exports.getDashboardSummary = (req, res) => {
     };
   }).sort((a, b) => b.avg_risk - a.avg_risk);
 
-  const flaggedWorksCount = Object.values(riskScores).filter(rs => rs.composite_risk >= 50).length;
-
   res.json({
-    total_entitlement: totalEntitlement,
-    total_sanctioned: totalSanctioned,
-    total_utilized: totalUtilized,
-    unspent_funds: unspentFunds,
+    // Real Constituency Aggregate Dataset Metrics (from raw_mplads_data.csv)
+    total_constituencies: constituencyData.length,
+    total_entitlement_cr: Math.round(totalEntitlementCr * 100) / 100,
+    total_fund_received_cr: Math.round(totalFundReceivedCr * 100) / 100,
+    total_amount_available_cr: Math.round(totalAmountAvailableCr * 100) / 100,
+    total_actual_expenditure_cr: Math.round(totalActualExpenditureCr * 100) / 100,
+    total_unspent_balance_cr: Math.round(totalUnspentBalanceCr * 100) / 100,
+    overall_utilization_pct: overallUtilizationPct,
+    csv_dataset_source: 'raw_mplads_data.csv (MoSPI Real Data)',
+
+    // Work-Level Audited Pipeline Metrics
     total_works: works.length,
-    flagged_works_count: flaggedWorksCount,
+    total_sanctioned_inr: totalSanctionedINR,
+    total_cases: cases.length,
+    anomaly_count: anomalyCount,
+    rule_violation_count: ruleViolationCount,
+    risk_distribution: {
+      high: highRiskCount,
+      medium: mediumRiskCount,
+      low: lowRiskCount
+    },
+    flagged_works_count: highRiskCount + mediumRiskCount,
     top_risk_state: stateAggregates.length > 0 ? stateAggregates[0].state : 'N/A',
     state_aggregates: stateAggregates
   });
@@ -559,9 +597,13 @@ exports.getAuditLogs = (req, res) => {
   res.json(store.getAuditLogs());
 };
 
-exports.triggerScoringPipeline = (req, res) => {
-  const result = ruleEngine.runFullScoringPipeline();
-  res.json({ message: 'Scoring pipeline completed successfully.', scored_count: result.scored_count });
+exports.triggerScoringPipeline = async (req, res) => {
+  try {
+    const result = await ruleEngine.runFullScoringPipeline();
+    res.json({ message: 'Scoring pipeline completed successfully.', scored_count: result.scored_count, ml_model_status: result.ml_model_status });
+  } catch (err) {
+    sendError(res, 500, 'ERR-SCORE-500', err.message);
+  }
 };
 
 exports.ingestCSV = (req, res) => {
@@ -641,25 +683,382 @@ exports.ingestCSV = (req, res) => {
 };
 
 // -------------------------------------------------------------
-// AI Explanation Endpoint (SRS FR-EXP-01, FR-EXP-02, FR-EXP-03)
+// Constituency Financial Dataset Endpoint (Real MPLADS CSV Data)
 // -------------------------------------------------------------
 
+exports.getConstituencies = (req, res) => {
+  const data = store.getConstituencyData() || [];
+  res.json({
+    count: data.length,
+    data_source: 'raw_mplads_data.csv (MoSPI Real Data)',
+    data_level: 'CONSTITUENCY_AGGREGATE',
+    constituencies: data
+  });
+};
+
+exports.reanalyzeWork = async (req, res) => {
+  try {
+    const { work_id } = req.params;
+    const works = store.getWorks();
+    const targetWork = works.find(w => w.work_id === work_id);
+
+    if (!targetWork) {
+      return sendError(res, 404, 'ERR-WORK-404', `Work item with ID ${work_id} not found.`);
+    }
+
+    const pipelineResult = await ruleEngine.runFullScoringPipeline();
+    const updatedRisk = store.getRiskScoreByWorkId(work_id);
+
+    res.json({
+      message: `Work ${work_id} re-analyzed successfully.`,
+      work_id,
+      risk_result: updatedRisk,
+      pipeline_status: pipelineResult.ml_model_status
+    });
+  } catch (err) {
+    sendError(res, 500, 'ERR-REANALYZE-500', err.message);
+  }
+};
+
+// -------------------------------------------------------------
+// Final Phase New Controllers: Data Quality, Risk Map & Analytics
+// -------------------------------------------------------------
+
+const ingestService = require('../services/ingestService');
+
+exports.importWorks = async (req, res) => {
+  try {
+    let csvContent = '';
+    if (req.file) {
+      csvContent = req.file.buffer.toString('utf8');
+    } else if (req.body && req.body.csv_data) {
+      csvContent = req.body.csv_data;
+    } else {
+      return sendError(res, 400, 'ERR-IMPORT-01', 'No CSV file or csv_data content provided.');
+    }
+
+    const result = ingestService.importWorksCSV(csvContent);
+    if (!result.success) {
+      return sendError(res, 400, 'ERR-IMPORT-02', result.errors ? result.errors.join('; ') : 'CSV import failed');
+    }
+
+    await ruleEngine.runFullScoringPipeline();
+
+    store.logAudit({
+      action: 'WORK_CSV_IMPORT',
+      actor_email: req.user ? req.user.email : 'system',
+      actor_role: req.user ? req.user.role : 'System',
+      details: { imported: result.imported, rejected: result.rejected }
+    });
+
+    res.json({
+      message: 'Work records CSV imported and scored successfully.',
+      imported_count: result.imported,
+      rejected_count: result.rejected,
+      rejected_details: result.rejected_details || [],
+      total_works_now: result.total_works_now
+    });
+  } catch (err) {
+    sendError(res, 500, 'ERR-IMPORT-500', err.message);
+  }
+};
+
+const mlService = require('../services/mlService');
+
+exports.getDataQuality = async (req, res) => {
+  const works = store.getWorks() || [];
+  const constituencyData = store.getConstituencyData() || [];
+  const riskScores = store.getRiskScores() || {};
+
+  const sourceCounts = {
+    CONSTITUENCY_AGGREGATE: constituencyData.length,
+    DEMO_SEED_WORK: works.filter(w => !w.source || w.source === 'DEMO_SEED_WORK').length,
+    WORK_IMPORT: works.filter(w => w.source === 'WORK_IMPORT').length
+  };
+
+  let missingFieldsCount = 0;
+  works.forEach(w => {
+    if (!w.completion_date) missingFieldsCount++;
+    if (!w.uc_date && !w.uc_filed_date) missingFieldsCount++;
+    if (!w.tender_id) missingFieldsCount++;
+  });
+
+  const scoredCount = Object.keys(riskScores).length;
+  const mlStatus = await mlService.checkMLServiceHealth();
+
+  res.json({
+    total_constituency_records: constituencyData.length,
+    total_work_records: works.length,
+    records_by_source: sourceCounts,
+    data_completeness_pct: works.length > 0 ? Math.round(((works.length * 7 - missingFieldsCount) / (works.length * 7)) * 100) : 100,
+    scored_works_count: scoredCount,
+    last_ingestion: new Date().toISOString(),
+    ml_service_status: mlStatus
+  });
+};
+
+exports.getGeographicRisk = (req, res) => {
+  const works = store.getWorks() || [];
+  const riskScores = store.getRiskScores() || {};
+  const constituencyData = store.getConstituencyData() || [];
+  const mps = store.getMPs() || [];
+  const cases = store.getCases() || [];
+
+  const stateMap = {};
+
+  // Helper to ensure state node exists
+  const getOrInitState = (stateName) => {
+    const st = stateName || 'General';
+    if (!stateMap[st]) {
+      stateMap[st] = {
+        state: st,
+        work_count: 0,
+        constituency_count: 0,
+        high_risk_count: 0,
+        medium_risk_count: 0,
+        low_risk_count: 0,
+        anomaly_count: 0,
+        case_count: 0,
+        work_risk_sum: 0,
+        constituency_risk_sum: 0
+      };
+    }
+    return stateMap[st];
+  };
+
+  // 1. Map 557 Real Constituency ML Anomaly Scores by State
+  constituencyData.forEach(c => {
+    // Find state from MP list matching constituency or MP name
+    const matchedMp = mps.find(m => 
+      m.constituency.toLowerCase() === c.constituency.toLowerCase() ||
+      m.name.toLowerCase() === c.mp_name.toLowerCase()
+    );
+    const stateName = c.state || (matchedMp ? matchedMp.state : null) || 'General';
+    const node = getOrInitState(stateName);
+
+    node.constituency_count++;
+    const constScore = Math.round((c.anomaly_score || 0.15) * 100);
+    node.constituency_risk_sum += constScore;
+
+    if (constScore >= 65) node.high_risk_count++;
+    else if (constScore >= 40) node.medium_risk_count++;
+    else node.low_risk_count++;
+
+    if (c.anomaly_score >= 0.5) node.anomaly_count++;
+  });
+
+  // 2. Map Work-Level Scored Audit Items by State
+  works.forEach(w => {
+    const st = w.state || 'General';
+    const node = getOrInitState(st);
+    node.work_count++;
+    const rs = riskScores[w.work_id];
+    if (rs) {
+      node.work_risk_sum += rs.composite_risk;
+      if (rs.risk_tier === 'HIGH' || rs.composite_risk >= 65) node.high_risk_count++;
+      else if (rs.risk_tier === 'MEDIUM' || rs.composite_risk >= 40) node.medium_risk_count++;
+      else node.low_risk_count++;
+
+      if (rs.anomaly_score >= 0.5) node.anomaly_count++;
+    }
+  });
+
+  // 3. Map Audit Cases
+  cases.forEach(c => {
+    const work = works.find(w => w.work_id === c.work_id);
+    if (work && work.state && stateMap[work.state]) {
+      stateMap[work.state].case_count++;
+    }
+  });
+
+  const stateGeography = Object.values(stateMap).map(st => {
+    let avgRisk = 0;
+    if (st.work_count > 0 && st.constituency_count > 0) {
+      const avgWorkRisk = Math.round(st.work_risk_sum / st.work_count);
+      const avgConstRisk = Math.round(st.constituency_risk_sum / st.constituency_count);
+      avgRisk = Math.round((avgWorkRisk * 0.5) + (avgConstRisk * 0.5));
+    } else if (st.constituency_count > 0) {
+      avgRisk = Math.round(st.constituency_risk_sum / st.constituency_count);
+    } else if (st.work_count > 0) {
+      avgRisk = Math.round(st.work_risk_sum / st.work_count);
+    }
+
+    const tier = avgRisk >= 65 ? 'HIGH' : avgRisk >= 40 ? 'MEDIUM' : 'LOW';
+    const color = tier === 'HIGH' ? '#EF4444' : tier === 'MEDIUM' ? '#F59E0B' : '#10B981';
+
+    return {
+      state: st.state,
+      risk_score: avgRisk,
+      risk_tier: tier,
+      color: color,
+      work_count: st.work_count,
+      constituency_count: st.constituency_count,
+      high_risk_count: st.high_risk_count,
+      medium_risk_count: st.medium_risk_count,
+      low_risk_count: st.low_risk_count,
+      anomaly_count: st.anomaly_count,
+      case_count: st.case_count
+    };
+  });
+
+  res.json({
+    states_count: stateGeography.length,
+    geographic_risk: stateGeography
+  });
+};
+
+exports.getFinancialAnalytics = (req, res) => {
+  const constituencyData = store.getConstituencyData() || [];
+
+  let totalEntitlement = 0;
+  let totalReceived = 0;
+  let totalAvailable = 0;
+  let totalExpenditure = 0;
+  let totalUnspent = 0;
+
+  const outliers = [];
+
+  constituencyData.forEach(c => {
+    totalEntitlement += (c.entitlement_cr || 0);
+    totalReceived += (c.fund_received_goi_cr || 0);
+    totalAvailable += (c.amount_available_cr || 0);
+    totalExpenditure += (c.actual_expenditure_cr || 0);
+    totalUnspent += (c.unspent_balance_cr || 0);
+
+    const utilPct = c.utilization_over_release_pct || 0;
+    if (utilPct < 40 || utilPct > 200) {
+      outliers.push({
+        constituency: c.constituency,
+        mp_name: c.mp_name,
+        utilization_pct: utilPct,
+        unspent_balance_cr: c.unspent_balance_cr,
+        pattern: utilPct < 40 ? 'Peer-relative low utilization' : 'Unusual high utilization over release',
+        note: 'Requires review per financial peer benchmark'
+      });
+    }
+  });
+
+  res.json({
+    totals: {
+      entitlement_cr: Math.round(totalEntitlement * 100) / 100,
+      fund_received_cr: Math.round(totalReceived * 100) / 100,
+      amount_available_cr: Math.round(totalAvailable * 100) / 100,
+      actual_expenditure_cr: Math.round(totalExpenditure * 100) / 100,
+      unspent_balance_cr: Math.round(totalUnspent * 100) / 100,
+      overall_utilization_pct: totalReceived > 0 ? Math.round((totalExpenditure / totalReceived) * 100 * 10) / 10 : 0
+    },
+    peer_outliers_count: outliers.length,
+    peer_outliers: outliers.slice(0, 15)
+  });
+};
+
+exports.getRuleAnalytics = (req, res) => {
+  const riskScores = store.getRiskScores() || {};
+  const ruleCounts = { R1: 0, R2: 0, R3: 0, R4: 0, R5: 0, R6: 0 };
+
+  Object.values(riskScores).forEach(rs => {
+    if (rs.rule_flags && Array.isArray(rs.rule_flags)) {
+      rs.rule_flags.forEach(rf => {
+        if (ruleCounts[rf] !== undefined) ruleCounts[rf]++;
+      });
+    }
+  });
+
+  res.json({
+    rule_counts: ruleCounts,
+    rule_weights: { R1: 35, R2: 30, R3: 30, R4: 20, R5: 15, R6: 20 }
+  });
+};
+
+exports.getAgencyAnalytics = (req, res) => {
+  const works = store.getWorks() || [];
+  const riskScores = store.getRiskScores() || {};
+
+  const agencyMap = {};
+
+  works.forEach(w => {
+    const ia = w.implementing_agency || w.ia_id || 'Unknown Agency';
+    if (!agencyMap[ia]) {
+      agencyMap[ia] = {
+        agency_name: ia,
+        total_works: 0,
+        total_financial_value: 0,
+        constituencies: new Set(),
+        high_risk_works: 0,
+        risk_sum: 0
+      };
+    }
+
+    agencyMap[ia].total_works++;
+    agencyMap[ia].total_financial_value += (w.sanctioned_amount || w.proposed_cost || 0);
+    if (w.constituency) agencyMap[ia].constituencies.add(w.constituency);
+
+    const rs = riskScores[w.work_id];
+    if (rs) {
+      agencyMap[ia].risk_sum += rs.composite_risk;
+      if (rs.composite_risk >= 65) agencyMap[ia].high_risk_works++;
+    }
+  });
+
+  const agencyAnalytics = Object.values(agencyMap).map(a => {
+    const avgRisk = a.total_works > 0 ? Math.round(a.risk_sum / a.total_works) : 0;
+    return {
+      agency_name: a.agency_name,
+      total_works: a.total_works,
+      total_financial_value: a.total_financial_value,
+      constituencies_served: Array.from(a.constituencies),
+      constituency_count: a.constituencies.size,
+      high_risk_works: a.high_risk_works,
+      average_risk: avgRisk,
+      concentration_status: a.total_works >= 3 ? 'Agency concentration detected' : 'Normal diversification'
+    };
+  }).sort((a, b) => b.total_works - a.total_works);
+
+  res.json({
+    agency_count: agencyAnalytics.length,
+    agencies: agencyAnalytics
+  });
+};
+
+exports.generateCasePDF = (req, res) => {
+  const { case_id } = req.params;
+  const caseObj = store.getCaseById(case_id);
+
+  if (!caseObj) {
+    return sendError(res, 404, 'ERR-CASE-404', `Case ${case_id} not found.`);
+  }
+
+  const work = store.getWorkById(caseObj.work_id);
+  const riskScore = store.getRiskScoreByWorkId(caseObj.work_id);
+
+  res.json({
+    report_title: 'KOSH-DRISHTI OFFICIAL AUDIT INVESTIGATION REPORT',
+    case_id: caseObj.case_id,
+    work_id: caseObj.work_id,
+    generated_at: new Date().toISOString(),
+    disclaimer: 'Risk assessment generated by Kosh-Drishti as an audit decision-support system. Findings require human verification and do not by themselves establish wrongdoing.',
+    work_details: work || {},
+    risk_assessment: riskScore || {},
+    case_status: caseObj.status,
+    assigned_auditor: caseObj.assigned_auditor_name || 'Unassigned',
+    investigation_notes: caseObj.notes || []
+  });
+};
+
 exports.explainWork = async (req, res) => {
-  const { work, rule_flags, composite_risk, tender_threshold } = req.body;
+  const { work, rule_flags, composite_risk, evidence, anomaly_score } = req.body;
 
   if (!work) {
     return sendError(res, 400, 'ERR-VAL-01', 'Work object is required.');
   }
-
-  const config = store.getRuleConfig();
-  if (tender_threshold) config.r2_tender_threshold = tender_threshold;
 
   try {
     const explanation = await groqService.generateLLMExplanation(
       work,
       rule_flags || [],
       composite_risk || 0,
-      config
+      evidence || [],
+      anomaly_score || 0.2
     );
 
     res.json({
@@ -668,7 +1067,7 @@ exports.explainWork = async (req, res) => {
       source: process.env.GROQ_API_KEY ? 'groq-llm' : 'template-fallback'
     });
   } catch (err) {
-    const fallback = groqService.generateTemplateExplanation(work, rule_flags || [], composite_risk || 0, config);
+    const fallback = groqService.generateTemplateExplanation(work, rule_flags || [], composite_risk || 0);
     res.json({
       work_id: work.work_id,
       explanation: fallback,

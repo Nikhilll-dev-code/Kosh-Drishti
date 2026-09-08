@@ -1,7 +1,11 @@
 const jwt = require('jsonwebtoken');
 const store = require('../models/store');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'kosh-drishti-sih2026-super-secret-key-9988';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is not configured. Please set it in the backend .env file.');
+}
 
 /**
  * Standardized Error Response Formatter (SRS Section 9.1)

@@ -11,7 +11,9 @@ app = FastAPI(
 )
 
 class FeatureVectorInput(BaseModel):
-    work_id: str
+    id: Optional[str] = None
+    work_id: Optional[str] = None
+    constituency_id: Optional[str] = None
     features: List[float] # 7 normalized numeric features
 
 class ScoringRequest(BaseModel):
@@ -21,29 +23,41 @@ class ExplainRequest(BaseModel):
     work: Dict[str, Any]
     rule_flags: List[str]
     composite_risk: int
-    tender_threshold: Optional[int] = 5000000
+    tender_threshold: Optional[int] = 2500000
 
 @app.get("/health")
 def health_check():
     return {
         "status": "UP",
         "service": "Kosh-Drishti ML Service",
-        "model_fitted": anomaly_scorer.is_fitted
+        "model_fitted": anomaly_scorer.is_fitted,
+        "contamination": anomaly_scorer.contamination,
+        "features_expected": 7
     }
 
 @app.post("/score")
 def score_works(req: ScoringRequest):
     if not req.items:
-        return {"scores": {}}
+        return {
+            "scores": {},
+            "model_status": "NO_ITEMS_PROVIDED",
+            "features_used": 7
+        }
 
     matrix = [item.features for item in req.items]
-    scores = anomaly_scorer.fit_predict(matrix)
+    scores, status = anomaly_scorer.fit_predict(matrix)
 
     result = {}
     for i, item in enumerate(req.items):
-        result[item.work_id] = scores[i]
+        item_id = item.id or item.work_id or item.constituency_id or f"ITEM-{i}"
+        result[item_id] = scores[i] if i < len(scores) else 0.2
 
-    return {"scores": result}
+    return {
+        "scores": result,
+        "model_status": status,
+        "features_used": 7,
+        "contamination_setting": anomaly_scorer.contamination
+    }
 
 @app.post("/explain")
 def explain_work(req: ExplainRequest):

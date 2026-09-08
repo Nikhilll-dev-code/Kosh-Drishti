@@ -202,34 +202,60 @@ export const WorksList = () => {
                 <tr>
                   <th className="py-3 px-4">Work ID</th>
                   <th className="py-3 px-4">State</th>
-                  <th className="py-3 px-4">Description</th>
-                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Title / Description</th>
                   <th className="py-3 px-4">Sanctioned Amount</th>
+                  <th className="py-3 px-4">Risk &amp; ML Status</th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ledger-line">
-                {works.map((w, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 font-mono font-bold text-ledger-navy">{w.work_id}</td>
-                    <td className="py-3 px-4 text-slate-700 font-medium">{w.state}</td>
-                    <td className="py-3 px-4 max-w-xs text-slate-800 truncate" title={w.description}>
-                      {w.description}
-                    </td>
-                    <td className="py-3 px-4 text-xs font-medium text-slate-600">{w.category}</td>
-                    <td className="py-3 px-4 font-mono font-medium">
-                      ₹{((w.sanctioned_amount || 0) / 100000).toFixed(2)} Lakhs
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <Link
-                        to={`/works/${w.work_id}`}
-                        className="text-xs font-semibold text-ledger-navy hover:text-amber-600 transition-colors inline-flex items-center gap-1"
-                      >
-                        Details <ArrowRight className="w-3.5 h-3.5" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {works.map((w, idx) => {
+                  const riskTier = w.risk_tier || (w.composite_risk >= 65 ? 'HIGH' : w.composite_risk >= 40 ? 'MEDIUM' : 'LOW');
+                  const badgeStyle = riskTier === 'HIGH'
+                    ? 'bg-rose-100 text-rose-800 border-rose-200'
+                    : riskTier === 'MEDIUM'
+                    ? 'bg-amber-100 text-amber-800 border-amber-200'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-200';
+
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-4 font-mono font-bold text-ledger-navy">
+                        <div>{w.work_id}</div>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 font-mono text-slate-500 border border-slate-200">
+                          {w.source === 'DEMO_SEED_WORK' ? 'DEMO SEED' : 'WORK ITEM'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-slate-700 font-medium">{w.state}</td>
+                      <td className="py-3 px-4 max-w-xs text-slate-800 truncate" title={w.title || w.description}>
+                        <div className="font-semibold text-slate-900 truncate">{w.title || w.description}</div>
+                        <div className="text-[11px] text-slate-500">{w.category}</div>
+                      </td>
+                      <td className="py-3 px-4 font-mono font-medium">
+                        ₹{(((w.sanctioned_amount || w.proposed_cost || 0)) / 100000).toFixed(2)} Lakhs
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 text-xs font-mono font-bold rounded-md border ${badgeStyle}`}>
+                            {riskTier} ({w.composite_risk || 0})
+                          </span>
+                          {w.anomaly_score >= 0.5 && (
+                            <span className="px-1.5 py-0.5 text-[10px] bg-amber-50 text-amber-700 border border-amber-300 font-mono rounded" title="IsolationForest Outlier Flag">
+                              ML Outlier
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <Link
+                          to={`/works/${w.work_id}`}
+                          className="text-xs font-semibold text-ledger-navy hover:text-amber-600 transition-colors inline-flex items-center gap-1"
+                        >
+                          Audit Details <ArrowRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

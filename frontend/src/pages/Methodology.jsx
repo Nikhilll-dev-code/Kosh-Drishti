@@ -91,15 +91,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R1" /> Duplicate Billing Signature
+                <RuleBadge code="R1" /> Ineligible Work Category
               </span>
               <span className="font-mono text-[11px] text-slate-500">Weight: 35 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Computes natural language TF-IDF cosine similarity between work descriptions executed by the same Implementing Agency (IA) across multiple financial years. If similarity &ge;90% with identical or near-identical amounts on the same asset coordinate, both works are flagged.
+              <span className="font-semibold">Logic:</span> Evaluates work description against prohibited statutory keywords (e.g. religious structures, private land, commercial complexes, clubs) per Para 3.3 negative list.
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: CAG Report No. 4 of 2018 §4.3 &middot; Prevention of repeated billing for single physical assets.
+            <div className="text-[11px] font-mono text-slate-500 bg-white p-2.5 rounded border border-slate-200">
+              Citation: MPLADS Guidelines Para 3.3 (Prohibited Asset Categories).
             </div>
           </div>
 
@@ -107,15 +107,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R2" /> Tender Ceiling Bypass Flag
+                <RuleBadge code="R2" /> Duplicate Work Recommendation
               </span>
               <span className="font-mono text-[11px] text-slate-500">Weight: 30 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Flags works with a sanctioned amount exceeding the configured tender threshold (default ₹50 Lakhs) that omit a valid Central Public Procurement Portal (CPPP) or State e-tender identifier.
+              <span className="font-semibold">Logic:</span> Evaluates multi-field Token Jaccard text &amp; cost similarity across works in the constituency. Flags works with &ge;85% blended similarity matching an existing recommendation.
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: MPLADS Guidelines §3.12 &middot; General Financial Rules (GFR) 2017 Rule 144.
+            <div className="text-[11px] font-mono text-slate-500 bg-white p-2.5 rounded border border-slate-200">
+              Citation: CAG Audit Report No. 4 of 2018 (Duplicate Sanction Findings).
             </div>
           </div>
 
@@ -123,15 +123,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R3" /> Ineligible Category Classification
+                <RuleBadge code="R3" /> Excessive Delay / UC Lag
               </span>
-              <span className="font-mono text-[11px] text-slate-500">Weight: 40 pts</span>
+              <span className="font-mono text-[11px] text-slate-500">Weight: 30 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Applies YAKE keyphrase extraction and semantic entity matching to detect expenditure recommended for prohibited items (religious structures, commercial monuments, private trusts).
+              <span className="font-semibold">Logic:</span> Measures timeline lag between work recommendation and Utilization Certificate (UC) filing. Flags works exceeding statutory window limit (&gt;225 days).
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: MPLADS Guidelines §2.4 Annexure-II &middot; List of Ineligible Works.
+            <div className="text-[11px] font-mono text-slate-500 bg-white p-2.5 rounded border border-slate-200">
+              Citation: MPLADS Guidelines Para 6.4 (Mandatory UC Submission Timelines).
             </div>
           </div>
 
@@ -139,15 +139,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R4" /> Chronic Fund Under-Utilization
+                <RuleBadge code="R4" /> Tender Threshold / Missing Tender Signal
               </span>
               <span className="font-mono text-[11px] text-slate-500">Weight: 20 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Computes the multi-year utilization decile for each MP and District Authority. If an entity falls into the lowest 10th percentile nationally for 2 or more consecutive years, Rule R4 triggers.
+              <span className="font-semibold">Logic:</span> Flags single works approaching or exceeding the competitive tender threshold (&ge;₹25 Lakhs) without attached tender ID. <span className="text-slate-500 italic">Note: Prototype screens single-work threshold proximity; multi-work split billing requires cross-work procurement linkage.</span>
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: MoSPI Master Circular on Scheme Fund Flow §5.1.
+            <div className="text-[11px] text-slate-500 font-mono bg-white p-2.5 rounded border border-slate-200">
+              Citation: MPLADS Procurement Mandate §7.2 (Mandatory E-Tendering Controls).
             </div>
           </div>
 
@@ -155,15 +155,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R5" /> SC / ST Statutory Allocation Violation
+                <RuleBadge code="R5" /> IA Over-Concentration
               </span>
-              <span className="font-mono text-[11px] text-slate-500">Weight: 25 pts</span>
+              <span className="font-mono text-[11px] text-slate-500">Weight: 15 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Enforces the statutory mandate that at least 15% of an MP&apos;s annual sanctioned spend must benefit Scheduled Caste (SC) inhabited areas and 7.5% for Scheduled Tribe (ST) areas.
+              <span className="font-semibold">Logic:</span> Evaluates agency work share within a constituency. Flags implementing agencies holding &gt;35% concentration share.
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: MPLADS Guidelines §3.2 &middot; Mandatory Social Justice Allocation Norms.
+            <div className="text-[11px] text-slate-500 font-mono bg-white p-2.5 rounded border border-slate-200">
+              Citation: MoSPI Competition &amp; Diversification Directives.
             </div>
           </div>
 
@@ -171,15 +171,15 @@ export const Methodology = () => {
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-serif font-bold text-base text-ledger-navy flex items-center gap-2">
-                <RuleBadge code="R6" /> Utilization Certificate (UC) Delay
+                <RuleBadge code="R6" /> Cost Benchmark Anomaly
               </span>
-              <span className="font-mono text-[11px] text-slate-500">Weight: 25 pts</span>
+              <span className="font-mono text-[11px] text-slate-500">Weight: 20 pts</span>
             </div>
             <p className="text-slate-700 leading-relaxed">
-              <span className="font-semibold">Logic:</span> Flags works where the Utilization Certificate is missing past the 30-day statutory window post-completion date (plus a configurable 15-day administrative grace buffer).
+              <span className="font-semibold">Logic:</span> Compares sanctioned cost against standard category cost benchmarks. Flags works exceeding 1.5x expected benchmark rate.
             </p>
-            <div className="text-[11px] text-slate-500 font-mono">
-              Citation: MPLADS Guidelines §4.4 &middot; GFR 2017 Rule 238(1) Form GFR 12-A.
+            <div className="text-[11px] text-slate-500 font-mono bg-white p-2.5 rounded border border-slate-200">
+              Citation: MoSPI Standard Unit Cost Norms for Public Infrastructure.
             </div>
           </div>
         </div>

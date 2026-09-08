@@ -30,6 +30,22 @@ export const IndiaMap = () => {
   const [hoveredEntity, setHoveredEntity] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [center, setCenter] = useState([82, 22]);
+  const [geoRiskMap, setGeoRiskMap] = useState({});
+
+  React.useEffect(() => {
+    fetch('/api/risk/geography')
+      .then(res => res.json())
+      .then(d => {
+        if (d && d.geographic_risk) {
+          const mapObj = {};
+          d.geographic_risk.forEach(item => {
+            mapObj[item.state.toLowerCase().replace(/[^a-z0-9]/g, '')] = item;
+          });
+          setGeoRiskMap(mapObj);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Robust State Lookup helper
   const getStateMeta = (rawName) => {
@@ -220,6 +236,9 @@ export const IndiaMap = () => {
                     geographies.map((geo) => {
                       const stName = geo.properties.st_nm || geo.properties.NAME_1 || geo.properties.name;
                       const isHovered = hoveredEntity?.name === stName;
+                      const cleanKey = (stName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                      const riskItem = geoRiskMap[cleanKey];
+                      const fillColor = riskItem ? riskItem.color : STATE_BASE_COLOR;
 
                       return (
                         <Geography
@@ -231,14 +250,17 @@ export const IndiaMap = () => {
                               type: 'state',
                               name: meta?.state || stName,
                               capital: meta?.capital || 'State HQ',
-                              mps_count: meta?.mps_count || 26
+                              mps_count: meta?.mps_count || 26,
+                              risk_score: riskItem?.risk_score ?? 'N/A',
+                              risk_tier: riskItem?.risk_tier ?? 'LOW',
+                              high_risk_count: riskItem?.high_risk_count ?? 0
                             });
                           }}
                           onMouseLeave={() => setHoveredEntity(null)}
                           onClick={() => handleStateClick(stName)}
                           style={{
                             default: {
-                              fill: STATE_BASE_COLOR,
+                              fill: fillColor,
                               stroke: STROKE_COLOR,
                               strokeWidth: 0.6,
                               outline: 'none',
