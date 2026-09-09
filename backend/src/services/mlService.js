@@ -1,4 +1,3 @@
-const http = require('http');
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -8,6 +7,8 @@ const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
  * Sends a list of feature vectors to the Python FastAPI IsolationForest ML Service
  * Payload structure expected by ML Service:
  * { items: [ { work_id: string, features: number[] } ] }
+ *
+ * Uses Node 18+ native fetch() which supports both HTTP and HTTPS transparently.
  */
 async function fetchMLAnomalyScores(featureItems) {
   if (!featureItems || featureItems.length === 0) {
@@ -16,63 +17,37 @@ async function fetchMLAnomalyScores(featureItems) {
 
   const payload = JSON.stringify({ items: featureItems });
 
-  return new Promise((resolve) => {
-    try {
-      const url = new URL(`${ML_SERVICE_URL}/score`);
-      const req = http.request(
-        {
-          hostname: url.hostname,
-          port: url.port || 8000,
-          path: url.pathname,
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(payload)
-          },
-          timeout: 3000 // 3 second connection timeout
-        },
-        (res) => {
-          let rawData = '';
-          res.on('data', chunk => { rawData += chunk; });
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              try {
-                const parsed = JSON.parse(rawData);
-                resolve({
-                  scores: parsed.scores || {},
-                  model_status: parsed.model_status || 'ISOLATION_FOREST_ACTIVE',
-                  features_used: parsed.features_used || 7
-                });
-              } catch (e) {
-                console.warn('[MLService] Error parsing ML service response, using fallback scores');
-                resolve(createFallbackScores(featureItems));
-              }
-            } else {
-              console.warn(`[MLService] HTTP ${res.statusCode} from ML service, using fallback scores`);
-              resolve(createFallbackScores(featureItems));
-            }
-          });
-        }
-      );
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
 
-      req.on('error', (err) => {
-        console.warn(`[MLService] Unable to connect to Python ML Service (${err.message}). Using heuristic ML fallback.`);
-        resolve(createFallbackScores(featureItems));
-      });
+    const res = await fetch(`${ML_SERVICE_URL}/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
 
-      req.on('timeout', () => {
-        req.destroy();
-        console.warn('[MLService] Request to ML service timed out. Using heuristic ML fallback.');
-        resolve(createFallbackScores(featureItems));
-      });
-
-      req.write(payload);
-      req.end();
-    } catch (err) {
-      console.warn(`[MLService] Request setup error: ${err.message}. Using fallback.`);
-      resolve(createFallbackScores(featureItems));
+    if (res.ok) {
+      const parsed = await res.json();
+      return {
+        scores: parsed.scores || {},
+        model_status: parsed.model_status || 'ISOLATION_FOREST_ACTIVE',
+        features_used: parsed.features_used || 7
+      };
+    } else {
+      console.warn(`[MLService] HTTP ${res.status} from ML service, using fallback scores`);
+      return createFallbackScores(featureItems);
     }
-  });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.warn('[MLService] Request to ML service timed out. Using heuristic ML fallback.');
+    } else {
+      console.warn(`[MLService] Unable to connect to Python ML Service (${err.message}). Using heuristic ML fallback.`);
+    }
+    return createFallbackScores(featureItems);
+  }
 }
 
 /**
@@ -103,47 +78,29 @@ function createFallbackScores(featureItems) {
 /**
  * Dynamic Health Check for Python FastAPI IsolationForest ML Service (Task 9)
  * Returns 'HEALTHY', 'DEGRADED', or 'UNAVAILABLE'
+ *
+ * Uses Node 18+ native fetch() which supports both HTTP and HTTPS transparently.
  */
 async function checkMLServiceHealth() {
-  return new Promise((resolve) => {
-    try {
-      const url = new URL(`${ML_SERVICE_URL}/health`);
-      const req = http.request(
-        {
-          hostname: url.hostname,
-          port: url.port || 8000,
-          path: url.pathname,
-          method: 'GET',
-          timeout: 1500 // 1.5s timeout for health check
-        },
-        (res) => {
-          let raw = '';
-          res.on('data', chunk => { raw += chunk; });
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              try {
-                const parsed = JSON.parse(raw);
-                if (parsed.status === 'UP') {
-                  resolve('HEALTHY');
-                } else {
-                  resolve('DEGRADED');
-                }
-              } catch (e) {
-                resolve('DEGRADED');
-              }
-            } else {
-              resolve('DEGRADED');
-            }
-          });
-        }
-      );
-      req.on('error', () => resolve('UNAVAILABLE'));
-      req.on('timeout', () => { req.destroy(); resolve('UNAVAILABLE'); });
-      req.end();
-    } catch (e) {
-      resolve('UNAVAILABLE');
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
+
+    const res = await fetch(`${ML_SERVICE_URL}/health`, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const parsed = await res.json();
+      return parsed.status === 'UP' ? 'HEALTHY' : 'DEGRADED';
+    } else {
+      return 'DEGRADED';
     }
-  });
+  } catch (err) {
+    return 'UNAVAILABLE';
+  }
 }
 
 module.exports = {

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 from app.isolation_forest import anomaly_scorer
@@ -8,6 +9,14 @@ app = FastAPI(
     title="Kosh-Drishti ML & Scoring Service",
     description="Isolation Forest Anomaly Scoring & Plain-Language Explainer API for SIH26102",
     version="1.0.0"
+)
+
+# CORS: allow backend service and localhost dev
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # ML service is internal, not browser-facing
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class FeatureVectorInput(BaseModel):
@@ -71,3 +80,10 @@ def explain_work(req: ExplainRequest):
         "work_id": req.work.get("work_id"),
         "explanation": explanation
     }
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
+

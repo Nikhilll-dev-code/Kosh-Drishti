@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 import {
@@ -33,7 +34,7 @@ export const IndiaMap = () => {
   const [geoRiskMap, setGeoRiskMap] = useState({});
 
   React.useEffect(() => {
-    fetch('/api/risk/geography')
+    fetch(getApiUrl('/api/risk/geography'))
       .then(res => res.json())
       .then(d => {
         if (d && d.geographic_risk) {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { Link } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion } from 'framer-motion';
 import { AuthContext } from '../context/AuthContext';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -37,7 +38,7 @@ export const CaseQueue = () => {
     let url = `/api/cases?`;
     if (statusFilter !== 'All') url += `status=${statusFilter}&`;
 
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(getApiUrl(url), { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => res.json())
       .then((d) => {
         let list = Array.isArray(d) ? d : [];

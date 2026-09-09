@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion } from 'framer-motion';
 import { AuthContext } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -57,7 +58,7 @@ export const WorkDetail = () => {
   }, [work_id]);
 
   const fetchWorkDetail = () => {
-    fetch(`/api/works/${work_id}`)
+    fetch(getApiUrl(`/api/works/${work_id}`))
       .then((res) => res.json())
       .then((d) => {
         if (d && d.work) {
@@ -132,7 +133,7 @@ export const WorkDetail = () => {
     }
 
     try {
-      const res = await fetch(`/api/cases/${data?.case_info?.case_id}/status`, {
+      const res = await fetch(getApiUrl(`/api/cases/${data?.case_info?.case_id}/status`), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -166,7 +167,7 @@ export const WorkDetail = () => {
     };
 
     try {
-      await fetch(`/api/cases/${data?.case_info?.case_id}/notes`, {
+      await fetch(getApiUrl(`/api/cases/${data?.case_info?.case_id}/notes`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

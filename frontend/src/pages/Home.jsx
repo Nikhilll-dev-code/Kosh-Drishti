@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion } from 'framer-motion';
 import { IndiaMap } from '../components/IndiaMap';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
@@ -43,7 +44,7 @@ export const Home = () => {
   const [loadingSummary, setLoadingSummary] = useState(true);
 
   useEffect(() => {
-    fetch('/api/dashboard/summary')
+    fetch(getApiUrl('/api/dashboard/summary'))
       .then(res => res.json())
       .then(data => {
         setSummaryData(data);

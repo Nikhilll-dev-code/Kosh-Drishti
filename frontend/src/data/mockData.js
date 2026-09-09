@@ -1,5 +1,6 @@
 // Comprehensive Mock Dataset for Kosh-Drishti (SIH26102)
 // Provides realistic state aggregates, MP data, flagged works, rules R1-R6, and confirmed cases
+import { getApiUrl } from '../config/api';
 
 export const MOCK_SUMMARY = {
   total_sanctioned: 39540000000, // ₹3,954 Cr
@@ -373,7 +374,7 @@ export const MOCK_AUDIT_LOGS = [
 // Helper to fetch live or return mock seamlessly
 export async function fetchWithFallback(url, options = {}, fallbackData = null) {
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(getApiUrl(url), options);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }

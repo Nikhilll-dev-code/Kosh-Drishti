@@ -1,5 +1,6 @@
 import React, { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion } from 'framer-motion';
 import { AuthContext } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -49,7 +50,7 @@ export const Login = () => {
       }
 
       try {
-        const res = await fetch('/api/auth/register', {
+        const res = await fetch(getApiUrl('/api/auth/register'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, password, department })
@@ -69,7 +70,7 @@ export const Login = () => {
       }
     } else {
       try {
-        const res = await fetch('/api/auth/login', {
+        const res = await fetch(getApiUrl('/api/auth/login'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
@@ -128,8 +129,8 @@ export const Login = () => {
       >
         {/* Top Header */}
         <div className="bg-ledger-navy p-7 text-white text-center relative">
-          <div className="inline-flex p-3.5 bg-gradient-to-br from-amber-400 to-amber-500 text-ledger-navy rounded-2xl mb-3 shadow-lg shadow-amber-500/20">
-            <ShieldAlert className="w-8 h-8" />
+          <div className="w-16 h-16 rounded-2xl overflow-hidden bg-white p-1 mx-auto mb-3 shadow-lg border border-amber-400/40">
+            <img src="/logo.jpg" alt="Kosh-Drishti logo" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-serif font-bold text-slate-100">
             {isPendingSubmitted

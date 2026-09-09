@@ -86,8 +86,8 @@ export const TopBar = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Branding & SIH Tag */}
         <Link to="/" className="flex items-center gap-3 group shrink-0">
-          <div className="p-2 bg-gradient-to-br from-amber-400 to-amber-500 text-ledger-navy rounded-lg font-bold shadow-md shadow-amber-500/20 transition-transform group-hover:scale-105">
-            <ShieldAlert className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden bg-white p-0.5 border border-amber-400/40 shadow-md transition-transform group-hover:scale-105">
+            <img src="/logo.jpg" alt="Kosh-Drishti logo" className="w-full h-full object-contain" />
           </div>
           <div>
             <div className="font-serif font-bold text-lg tracking-wide flex items-center gap-2 text-slate-100">

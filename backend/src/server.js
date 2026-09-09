@@ -12,7 +12,25 @@ const ruleEngine = require('./services/ruleEngineService');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// CORS: allow deployed Vercel frontend + localhost dev
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5000'
+];
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+}
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (server-to-server, curl, health checks)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // In production, also allow any *.vercel.app preview deploys
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    callback(null, true); // Fallback: allow all for SIH prototype
+  },
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Health Check Endpoint (SRS T-SET-02)

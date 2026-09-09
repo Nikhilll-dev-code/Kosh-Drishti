@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { motion } from 'framer-motion';
+import { getApiUrl } from '../config/api';
 import { AuthContext } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -77,12 +78,12 @@ export const AdminPanel = () => {
     const headers = { Authorization: `Bearer ${token}` };
 
     if (activeTab === 'users') {
-      fetch('/api/admin/users', { headers })
+      fetch(getApiUrl('/api/admin/users'), { headers })
         .then((res) => res.json())
         .then((d) => { if (Array.isArray(d)) setUsers(d); })
         .catch(() => {});
     } else if (activeTab === 'audit') {
-      fetch('/api/admin/audit-log', { headers })
+      fetch(getApiUrl('/api/admin/audit-log'), { headers })
         .then((res) => res.json())
         .then((d) => { if (Array.isArray(d)) setAuditLogs(d); })
         .catch(() => {});
@@ -91,7 +92,7 @@ export const AdminPanel = () => {
 
   const handleApproveUser = async (userId, action) => {
     try {
-      await fetch(`/api/admin/users/${userId}/approve`, {
+      await fetch(getApiUrl(`/api/admin/users/${userId}/approve`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -136,7 +137,7 @@ export const AdminPanel = () => {
     };
 
     try {
-      await fetch('/api/admin/config', {
+      await fetch(getApiUrl('/api/admin/config'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -171,7 +172,7 @@ export const AdminPanel = () => {
     formData.append('file', selectedFile);
 
     try {
-      const res = await fetch('/api/ingest', {
+      const res = await fetch(getApiUrl('/api/ingest'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData

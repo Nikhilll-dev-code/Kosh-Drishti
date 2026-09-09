@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 import { motion } from 'framer-motion';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { DisclaimerBanner } from '../components/DisclaimerBanner';
@@ -47,7 +48,7 @@ export const WorksList = () => {
     if (stateFilter) url += `state=${encodeURIComponent(stateFilter)}&`;
     if (categoryFilter) url += `category=${encodeURIComponent(categoryFilter)}&`;
 
-    fetch(url)
+    fetch(getApiUrl(url))
       .then((res) => res.json())
       .then((d) => {
         setWorks(d?.works || []);
