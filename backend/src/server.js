@@ -61,7 +61,16 @@ app.get('*', (req, res, next) => {
 // Auto-seed if database is unseeded
 if (store.getWorks().length === 0) {
   console.log('Database empty on startup. Triggering initial seed...');
-  require('./seed/seedData');
+  
+  const seed = require('./seed/seedData');
+
+  seed()
+    .then(() => {
+      console.log('Initial database seed completed successfully.');
+    })
+    .catch((err) => {
+      console.error('Initial database seed failed:', err);
+    });
 }
 
 app.listen(PORT, () => {

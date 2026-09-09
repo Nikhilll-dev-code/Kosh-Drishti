@@ -9,7 +9,19 @@ async function seed() {
 
   // 1. Ingest Real Constituency CSV Dataset (558 records)
   console.log('[Seed] Parsing real MPLADS constituency dataset...');
-  ingestMPLADSCSV();
+  const ingestResult = ingestMPLADSCSV();
+
+if (!ingestResult.success || ingestResult.count === 0) {
+  throw new Error(
+    `[Seed] Real MPLADS dataset ingestion failed: ${
+      ingestResult.message || ingestResult.error || 'No records loaded'
+    }`
+  );
+}
+
+console.log(
+  `[Seed] Successfully ingested ${ingestResult.count} real constituency records.`
+);
 
   // 2. Ensure default rule thresholds & weight splits
   store.data.ruleConfig.r2_tender_threshold = 2500000; // ₹25 Lakhs INR
